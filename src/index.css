@@ -1,0 +1,54 @@
+@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Plus+Jakarta+Sans:wght@400;600;700;800&family=Teko:wght@600;700&display=swap');
+@import "tailwindcss";
+
+:root {
+  --font-display: 'Teko', sans-serif;
+  --font-serif: 'Cinzel', serif;
+  --font-sans: 'Plus Jakarta Sans', sans-serif;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  background-color: #08090d;
+  color: #f1f5f9;
+  font-family: var(--font-sans);
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* Ensure canvas doesn't trigger drag or selection */
+canvas {
+  touch-action: none;
+}
+
+/* Custom Shinobi Scrollbar Styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #090c14;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #ef4444 0%, #b91c1c 100%);
+  border-radius: 4px;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #f87171 0%, #dc2626 100%);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #ef4444 #090c14;
+}
+
