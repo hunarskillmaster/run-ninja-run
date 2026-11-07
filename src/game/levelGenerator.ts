@@ -1,4 +1,21 @@
-import { CoinCollectible, Hazard, LaserGrid, Pitfall, ScrollCollectible, Shuriken, Spike } from './types.ts';
+import {
+  CoinCollectible,
+  Hazard,
+  LaserGrid,
+  ScrollCollectible,
+  Shuriken,
+  Spike,
+} from './types.ts';
+
+type Pattern =
+  | 'floor_spikes'
+  | 'ceiling_spikes'
+  | 'alternating_spikes'
+  | 'laser_bottom'
+  | 'laser_top'
+  | 'shuriken_wave'
+  | 'pitfall_crossing'
+  | 'gauntlet';
 
 export interface GeneratedChunk {
   hazards: Hazard[];
@@ -7,14 +24,39 @@ export interface GeneratedChunk {
   width: number;
 }
 
+export type RandomSource = () => number;
+
+const ALL_PATTERNS: Pattern[] = [
+  'floor_spikes',
+  'ceiling_spikes',
+  'alternating_spikes',
+  'laser_bottom',
+  'laser_top',
+  'shuriken_wave',
+  'pitfall_crossing',
+  'gauntlet',
+];
+
+const INTRO_PATTERNS: Pattern[] = [
+  'floor_spikes',
+  'ceiling_spikes',
+  'alternating_spikes',
+];
+
 export class LevelGenerator {
-  private nextX: number = 700; // 700px running room at start
+  private nextX = 700;
   private floorY: number;
   private ceilingY: number;
   private stageId: number;
-  private scrollCounter: number = 0;
+  private chunkNumber = 0;
+  private scrollNumber = 0;
 
-  constructor(floorY: number, ceilingY: number, stageId: number = 1) {
+  constructor(
+    floorY: number,
+    ceilingY: number,
+    stageId = 1,
+    private readonly random: RandomSource = Math.random
+  ) {
     this.floorY = floorY;
     this.ceilingY = ceilingY;
     this.stageId = stageId;
@@ -25,339 +67,223 @@ export class LevelGenerator {
     this.ceilingY = ceilingY;
   }
 
-  public reset(startX: number = 700, stageId: number = 1) {
+  public reset(startX = 700, stageId = 1) {
     this.nextX = startX;
     this.stageId = stageId;
-    this.scrollCounter = 0;
+    this.chunkNumber = 0;
+    this.scrollNumber = 0;
   }
 
-  // Generates new chunks forward ahead of the camera viewport
-  public generateUpTo(targetX: number): {
-    hazards: Hazard[];
-    scrolls: ScrollCollectible[];
-    coins: CoinCollectible[];
-  } {
-    const newHazards: Hazard[] = [];
-    const newScrolls: ScrollCollectible[] = [];
-    const newCoins: CoinCollectible[] = [];
+  public generateUpTo(targetX: number) {
+    const generated = {
+      hazards: [] as Hazard[],
+      scrolls: [] as ScrollCollectible[],
+      coins: [] as CoinCollectible[],
+    };
 
     while (this.nextX < targetX) {
-      const chunk = this.createRandomChunk(this.nextX);
-      newHazards.push(...chunk.hazards);
-      newScrolls.push(...chunk.scrolls);
-      newCoins.push(...chunk.coins);
+      const chunk = this.createChunk(this.nextX);
+      generated.hazards.push(...chunk.hazards);
+      generated.scrolls.push(...chunk.scrolls);
+      generated.coins.push(...chunk.coins);
       this.nextX += chunk.width;
     }
 
-    return {
-      hazards: newHazards,
-      scrolls: newScrolls,
-      coins: newCoins,
-    };
+    return generated;
   }
 
-  private createRandomChunk(startX: number): GeneratedChunk {
-    this.scrollCounter++;
-    // Spawn an invincibility scroll every 4 chunks (or chunk 2 on stage 1 for intro)
-    const shouldSpawnScroll = this.scrollCounter % 4 === 0 || (this.scrollCounter === 2 && this.stageId === 1);
+  private createChunk(startX: number): GeneratedChunk {
+    this.chunkNumber++;
+    const chunk = this.buildPattern(this.pickPattern(), startX);
 
-    const patterns = [
-      'floor_spikes',
-      'ceiling_spikes',
-      'alternating_spikes',
-      'laser_bottom',
-      'laser_top',
-      'shuriken_wave',
-      'pitfall_crossing',
-      'gauntlet',
-    ];
-
-    // Filter pattern availability based on stage progression
-    let eligible = ['floor_spikes', 'ceiling_spikes', 'alternating_spikes'];
-    if (this.stageId >= 2) {
-      eligible.push('laser_bottom', 'laser_top');
-    }
-    if (this.stageId >= 3) {
-      eligible.push('shuriken_wave');
-    }
-    if (this.stageId >= 4 || this.stageId === 0) {
-      eligible = patterns;
-    }
-
-    const pattern = eligible[Math.floor(Math.random() * eligible.length)];
-    const chunk = this.buildPattern(pattern, startX);
-
-    if (shouldSpawnScroll) {
-      const scrollY = Math.random() > 0.5 ? this.floorY - 60 : this.ceilingY + 60;
-      chunk.scrolls.push({
-        id: `scroll_${Math.random().toString(36).substring(2, 9)}`,
-        x: startX + 60,
-        y: scrollY,
-        radius: 16,
-        collected: false,
-        hoverOffset: 0,
-      });
+    // The first stage offers a scroll early, then settles into one every four chunks.
+    const isScrollChunk = this.chunkNumber % 4 === 0;
+    const isIntroScroll = this.stageId === 1 && this.chunkNumber === 2;
+    if (isScrollChunk || isIntroScroll) {
+      chunk.scrolls.push(this.createScroll(startX));
     }
 
     return chunk;
   }
 
-  private buildPattern(type: string, startX: number): GeneratedChunk {
+  private pickPattern(): Pattern {
+    const patterns: Pattern[] =
+      this.stageId >= 4 || this.stageId === 0
+        ? ALL_PATTERNS
+        : this.stageId >= 3
+          ? [...INTRO_PATTERNS, 'laser_bottom', 'laser_top', 'shuriken_wave']
+          : this.stageId >= 2
+            ? [...INTRO_PATTERNS, 'laser_bottom', 'laser_top']
+            : INTRO_PATTERNS;
+
+    return patterns[Math.floor(this.random() * patterns.length)];
+  }
+
+  private createScroll(startX: number): ScrollCollectible {
+    this.scrollNumber++;
+    const onFloorSide = this.random() > 0.5;
+
+    return {
+      id: `scroll_${this.scrollNumber}`,
+      x: startX + 60,
+      y: onFloorSide ? this.floorY - 60 : this.ceilingY + 60,
+      radius: 16,
+      collected: false,
+      hoverOffset: 0,
+    };
+  }
+
+  private createCoin(id: string, x: number, y: number, hoverOffset: number): CoinCollectible {
+    return {
+      id,
+      x,
+      y,
+      radius: 11,
+      collected: false,
+      value: 1,
+      hoverOffset,
+    };
+  }
+
+  private buildPattern(type: Pattern, startX: number): GeneratedChunk {
     const hazards: Hazard[] = [];
     const coins: CoinCollectible[] = [];
-    const scrolls: ScrollCollectible[] = [];
+    const playHeight = this.floorY - this.ceilingY;
     let width = 600;
 
-    const playHeight = this.floorY - this.ceilingY;
-
     switch (type) {
-      case 'floor_spikes': {
+      case 'floor_spikes':
         width = 550;
-        const spikeCount = Math.floor(Math.random() * 2) + 2;
-        const spikeW = 28;
-        const spikeH = 36;
-        for (let i = 0; i < spikeCount; i++) {
-          hazards.push({
-            id: `spike_f_${startX}_${i}`,
-            type: 'spike',
-            x: startX + 180 + i * (spikeW + 4),
-            y: this.floorY - spikeH,
-            width: spikeW,
-            height: spikeH,
-            surface: 'floor',
-          });
-        }
-        // Coins on ceiling prompt player to flip upwards
+        this.addSpikes(hazards, startX, 'floor');
         for (let i = 0; i < 4; i++) {
-          coins.push({
-            id: `coin_${startX}_${i}`,
-            x: startX + 140 + i * 40,
-            y: this.ceilingY + 28,
-            radius: 11,
-            collected: false,
-            value: 1,
-            hoverOffset: i * 0.5,
-          });
+          coins.push(this.createCoin(`coin_${startX}_${i}`, startX + 140 + i * 40, this.ceilingY + 28, i * 0.5));
         }
         break;
-      }
 
-      case 'ceiling_spikes': {
+      case 'ceiling_spikes':
         width = 550;
-        const spikeCount = Math.floor(Math.random() * 2) + 2;
-        const spikeW = 28;
-        const spikeH = 38;
-        for (let i = 0; i < spikeCount; i++) {
-          hazards.push({
-            id: `spike_c_${startX}_${i}`,
-            type: 'spike',
-            x: startX + 180 + i * (spikeW + 6),
-            y: this.ceilingY,
-            width: spikeW,
-            height: spikeH,
-            surface: 'ceiling',
-          });
-        }
-        // Coins along floor prompt player to stay grounded
+        this.addSpikes(hazards, startX, 'ceiling');
         for (let i = 0; i < 4; i++) {
-          coins.push({
-            id: `coin_${startX}_${i}`,
-            x: startX + 140 + i * 40,
-            y: this.floorY - 28,
-            radius: 11,
-            collected: false,
-            value: 1,
-            hoverOffset: i * 0.5,
-          });
+          coins.push(this.createCoin(`coin_${startX}_${i}`, startX + 140 + i * 40, this.floorY - 28, i * 0.5));
         }
         break;
-      }
 
-      case 'alternating_spikes': {
+      case 'alternating_spikes':
         width = 750;
-        // Floor spike followed by ceiling spike requires double flip timing
-        hazards.push({
-          id: `spike_alt_1_${startX}`,
-          type: 'spike',
-          x: startX + 180,
-          y: this.floorY - 38,
-          width: 32,
-          height: 38,
-          surface: 'floor',
-        });
-        hazards.push({
-          id: `spike_alt_2_${startX}`,
-          type: 'spike',
-          x: startX + 420,
-          y: this.ceilingY,
-          width: 32,
-          height: 38,
-          surface: 'ceiling',
-        });
-        // Sine wave arc of coins weaving between floor and ceiling
+        hazards.push(
+          this.spike(`spike_alt_1_${startX}`, startX + 180, this.floorY - 38, 32, 38, 'floor'),
+          this.spike(`spike_alt_2_${startX}`, startX + 420, this.ceilingY, 32, 38, 'ceiling')
+        );
         for (let i = 0; i < 6; i++) {
-          const t = i / 5;
-          const coinY = this.ceilingY + 30 + Math.sin(t * Math.PI) * (playHeight - 60);
-          coins.push({
-            id: `coin_arc_${startX}_${i}`,
-            x: startX + 150 + i * 70,
-            y: coinY,
-            radius: 11,
-            collected: false,
-            value: 1,
-            hoverOffset: i * 0.4,
-          });
+          const progress = i / 5;
+          const y = this.ceilingY + 30 + Math.sin(progress * Math.PI) * (playHeight - 60);
+          coins.push(this.createCoin(`coin_arc_${startX}_${i}`, startX + 150 + i * 70, y, i * 0.4));
         }
         break;
-      }
 
-      case 'laser_bottom': {
+      case 'laser_bottom':
         width = 650;
-        const laserH = playHeight * 0.58;
-        hazards.push({
-          id: `laser_b_${startX}`,
-          type: 'laser',
-          x: startX + 260,
-          y: this.floorY - laserH,
-          width: 22,
-          height: laserH,
-          active: true,
-          zone: 'bottom',
-        });
-        for (let i = 0; i < 4; i++) {
-          coins.push({
-            id: `coin_l_${startX}_${i}`,
-            x: startX + 200 + i * 45,
-            y: this.ceilingY + 28,
-            radius: 11,
-            collected: false,
-            value: 1,
-            hoverOffset: i * 0.5,
-          });
-        }
+        hazards.push(this.laser(`laser_b_${startX}`, startX + 260, this.floorY - playHeight * 0.58, playHeight * 0.58, 'bottom'));
+        this.addLineOfCoins(coins, `coin_l_${startX}`, startX + 200, this.ceilingY + 28, 4);
         break;
-      }
 
-      case 'laser_top': {
+      case 'laser_top':
         width = 650;
-        const laserH = playHeight * 0.58;
-        hazards.push({
-          id: `laser_t_${startX}`,
-          type: 'laser',
-          x: startX + 260,
-          y: this.ceilingY,
-          width: 22,
-          height: laserH,
-          active: true,
-          zone: 'top',
-        });
-        for (let i = 0; i < 4; i++) {
-          coins.push({
-            id: `coin_lt_${startX}_${i}`,
-            x: startX + 200 + i * 45,
-            y: this.floorY - 28,
-            radius: 11,
-            collected: false,
-            value: 1,
-            hoverOffset: i * 0.5,
-          });
-        }
+        hazards.push(this.laser(`laser_t_${startX}`, startX + 260, this.ceilingY, playHeight * 0.58, 'top'));
+        this.addLineOfCoins(coins, `coin_lt_${startX}`, startX + 200, this.floorY - 28, 4);
         break;
-      }
 
-      case 'shuriken_wave': {
+      case 'shuriken_wave':
         width = 700;
-        hazards.push({
-          id: `shuriken_1_${startX}`,
-          type: 'shuriken',
-          x: startX + 350,
-          y: this.floorY - 32,
-          radius: 16,
-          vx: -180,
-          vy: 0,
-          rotation: 0,
-          pattern: 'straight',
-          baseY: this.floorY - 32,
-          timeAlive: 0,
-        });
-        hazards.push({
-          id: `shuriken_2_${startX}`,
-          type: 'shuriken',
-          x: startX + 560,
-          y: this.ceilingY + 36,
-          radius: 16,
-          vx: -200,
-          vy: 0,
-          rotation: 0,
-          pattern: 'sine',
-          baseY: this.ceilingY + 36,
-          timeAlive: 0,
-        });
+        hazards.push(
+          this.shuriken(`shuriken_1_${startX}`, startX + 350, this.floorY - 32, 'straight'),
+          this.shuriken(`shuriken_2_${startX}`, startX + 560, this.ceilingY + 36, 'sine')
+        );
         break;
-      }
 
-      case 'pitfall_crossing': {
+      case 'pitfall_crossing':
         width = 650;
-        const pitW = 160;
         hazards.push({
           id: `pit_f_${startX}`,
           type: 'pitfall',
           x: startX + 220,
-          width: pitW,
+          width: 160,
           surface: 'floor',
         });
-        for (let i = 0; i < 5; i++) {
-          coins.push({
-            id: `coin_pit_${startX}_${i}`,
-            x: startX + 180 + i * 45,
-            y: this.ceilingY + 28,
-            radius: 11,
-            collected: false,
-            value: 1,
-            hoverOffset: i * 0.5,
-          });
-        }
+        this.addLineOfCoins(coins, `coin_pit_${startX}`, startX + 180, this.ceilingY + 28, 5);
         break;
-      }
 
       case 'gauntlet':
-      default: {
         width = 850;
-        const laserH = playHeight * 0.55;
-        hazards.push({
-          id: `laser_g_${startX}`,
-          type: 'laser',
-          x: startX + 220,
-          y: this.floorY - laserH,
-          width: 22,
-          height: laserH,
-          active: true,
-          zone: 'bottom',
-        });
-        hazards.push({
-          id: `spike_g_${startX}`,
-          type: 'spike',
-          x: startX + 520,
-          y: this.ceilingY,
-          width: 32,
-          height: 38,
-          surface: 'ceiling',
-        });
-        for (let i = 0; i < 6; i++) {
-          coins.push({
-            id: `coin_g_${startX}_${i}`,
-            x: startX + 320 + i * 40,
-            y: this.ceilingY + 28,
-            radius: 11,
-            collected: false,
-            value: 1,
-            hoverOffset: i * 0.4,
-          });
-        }
+        hazards.push(
+          this.laser(`laser_g_${startX}`, startX + 220, this.floorY - playHeight * 0.55, playHeight * 0.55, 'bottom'),
+          this.spike(`spike_g_${startX}`, startX + 520, this.ceilingY, 32, 38, 'ceiling')
+        );
+        this.addLineOfCoins(coins, `coin_g_${startX}`, startX + 320, this.ceilingY + 28, 6, 0.4);
         break;
-      }
     }
 
-    return { hazards, scrolls, coins, width };
+    return { hazards, scrolls: [], coins, width };
+  }
+
+  private addSpikes(hazards: Hazard[], startX: number, surface: 'floor' | 'ceiling') {
+    const count = Math.floor(this.random() * 2) + 2;
+    const width = 28;
+    const height = surface === 'floor' ? 36 : 38;
+    const y = surface === 'floor' ? this.floorY - height : this.ceilingY;
+
+    for (let i = 0; i < count; i++) {
+      hazards.push(this.spike(`spike_${surface[0]}_${startX}_${i}`, startX + 180 + i * (width + (surface === 'floor' ? 4 : 6)), y, width, height, surface));
+    }
+  }
+
+  private addLineOfCoins(
+    coins: CoinCollectible[],
+    idPrefix: string,
+    startX: number,
+    y: number,
+    count: number,
+    hoverStep = 0.5
+  ) {
+    for (let i = 0; i < count; i++) {
+      coins.push(this.createCoin(`${idPrefix}_${i}`, startX + i * 45, y, i * hoverStep));
+    }
+  }
+
+  private spike(
+    id: string,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    surface: 'floor' | 'ceiling'
+  ): Spike {
+    return { id, type: 'spike', x, y, width, height, surface };
+  }
+
+  private laser(
+    id: string,
+    x: number,
+    y: number,
+    height: number,
+    zone: 'top' | 'bottom'
+  ): LaserGrid {
+    return { id, type: 'laser', x, y, width: 22, height, active: true, zone };
+  }
+
+  private shuriken(id: string, x: number, y: number, pattern: Shuriken['pattern']): Shuriken {
+    return {
+      id,
+      type: 'shuriken',
+      x,
+      y,
+      radius: 16,
+      vx: pattern === 'sine' ? -200 : -180,
+      vy: 0,
+      rotation: 0,
+      pattern,
+      baseY: y,
+      timeAlive: 0,
+    };
   }
 }

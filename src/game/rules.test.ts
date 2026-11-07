@@ -9,6 +9,7 @@ import {
   calculateRunScore,
 } from './rules.ts';
 import { LaserGrid, Spike } from './types.ts';
+import { LevelGenerator } from './levelGenerator.ts';
 
 test('createInitialPlayer initializes player with correct properties', () => {
   const floorY = 400;
@@ -165,4 +166,21 @@ test('combo and score calculations update accurately', () => {
   const score = calculateRunScore(100, 10, 5, 250);
   // 100 * 1.5 = 150 + 250 + 500 + 250 = 1150
   assert.equal(score, 1150);
+});
+
+test('level generation is repeatable with a supplied random source', () => {
+  const first = new LevelGenerator(500, 90, 4, () => 0.1).generateUpTo(2500);
+  const second = new LevelGenerator(500, 90, 4, () => 0.1).generateUpTo(2500);
+
+  assert.deepEqual(first, second);
+  assert.ok(first.hazards.length > 0);
+  assert.ok(first.coins.length > 0);
+});
+
+test('stage one introduces a scroll on its second chunk', () => {
+  const generator = new LevelGenerator(500, 90, 1, () => 0);
+  const result = generator.generateUpTo(1900);
+
+  assert.equal(result.scrolls.length, 1);
+  assert.equal(result.scrolls[0].id, 'scroll_1');
 });
